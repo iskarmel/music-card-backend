@@ -13,12 +13,8 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 
-const DB_FILE = path.join(process.cwd(), 'cards.json');
-
-// Ensure db file exists
-if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify({}));
-}
+// In-memory database for cards (since Render free tier has a read-only filesystem)
+const cardsDb = {};
 
 app.use(cors({
     origin: '*',
@@ -121,9 +117,7 @@ app.post('/api/cards', (req, res) => {
         const cardData = req.body;
         const id = uuidv4().substring(0, 8); // 8-char short ID
 
-        const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-        db[id] = cardData;
-        fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+        cardsDb[id] = cardData;
 
         res.json({ id });
     } catch (error) {
@@ -136,10 +130,9 @@ app.post('/api/cards', (req, res) => {
 app.get('/api/cards/:id', (req, res) => {
     try {
         const id = req.params.id;
-        const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
 
-        if (db[id]) {
-            res.json(db[id]);
+        if (cardsDb[id]) {
+            res.json(cardsDb[id]);
         } else {
             res.status(404).json({ error: 'Card not found' });
         }
