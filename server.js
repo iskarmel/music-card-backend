@@ -87,6 +87,31 @@ app.post('/api/generate', async (req, res) => {
     }
 });
 
+app.get('/api/speech', async (req, res) => {
+    try {
+        const text = req.query.text;
+        const voice = req.query.voice || 'alloy';
+
+        if (!text) {
+            return res.status(400).json({ error: 'Text is required' });
+        }
+
+        const mp3 = await openai.audio.speech.create({
+            model: "tts-1",
+            voice: voice,
+            input: text,
+            speed: 0.85,
+        });
+
+        const buffer = Buffer.from(await mp3.arrayBuffer());
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.send(buffer);
+    } catch (error) {
+        console.error('Error generating speech (GET):', error);
+        res.status(500).json({ error: 'Failed to generate speech' });
+    }
+});
+
 app.post('/api/speech', async (req, res) => {
     try {
         const { text, voice = 'alloy' } = req.body;
