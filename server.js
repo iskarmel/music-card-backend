@@ -7,6 +7,12 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegStatic from 'ffmpeg-static';
+import axios from 'axios';
+
+// Set the path to the ffmpeg static binary
+ffmpeg.setFfmpegPath(ffmpegStatic);
 
 dotenv.config();
 
@@ -91,20 +97,32 @@ app.post('/api/generate', async (req, res) => {
 app.get('/api/speech', async (req, res) => {
     try {
         const text = req.query.text;
-        const voice = req.query.voice || 'alloy';
+        const voiceId = req.query.voice || 'EXAVITQu4vr4xnSDxMaL'; // Default ElevenLabs voice Bella
 
         if (!text) {
             return res.status(400).json({ error: 'Text is required' });
         }
 
-        const mp3 = await openai.audio.speech.create({
-            model: "tts-1",
-            voice: voice,
-            input: text,
-            speed: 0.85,
+        const response = await axios({
+            method: 'post',
+            url: `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+            headers: {
+                'Accept': 'audio/mpeg',
+                'xi-api-key': process.env.ELEVENLABS_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            data: {
+                text: text,
+                model_id: 'eleven_multilingual_v2',
+                voice_settings: {
+                    stability: 0.5,
+                    similarity_boost: 0.75
+                }
+            },
+            responseType: 'arraybuffer'
         });
 
-        const buffer = Buffer.from(await mp3.arrayBuffer());
+        const buffer = Buffer.from(response.data);
         res.setHeader('Content-Type', 'audio/mpeg');
         res.send(buffer);
     } catch (error) {
@@ -115,25 +133,143 @@ app.get('/api/speech', async (req, res) => {
 
 app.post('/api/speech', async (req, res) => {
     try {
-        const { text, voice = 'alloy' } = req.body;
+        const { text, voice = 'EXAVITQu4vr4xnSDxMaL' } = req.body;
 
         if (!text) {
             return res.status(400).json({ error: 'Text is required' });
         }
 
-        const mp3 = await openai.audio.speech.create({
-            model: "tts-1",
-            voice: voice,
-            input: text,
-            speed: 0.85,
+        const response = await axios({
+            method: 'post',
+            url: `https://api.elevenlabs.io/v1/text-to-speech/${voice}`,
+            headers: {
+                'Accept': 'audio/mpeg',
+                'xi-api-key': process.env.ELEVENLABS_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            data: {
+                text: text,
+                model_id: 'eleven_multilingual_v2',
+                voice_settings: {
+                    stability: 0.5,
+                    similarity_boost: 0.75
+                }
+            },
+            responseType: 'arraybuffer'
         });
 
-        const buffer = Buffer.from(await mp3.arrayBuffer());
+        const buffer = Buffer.from(response.data);
         res.setHeader('Content-Type', 'audio/mpeg');
         res.send(buffer);
     } catch (error) {
         console.error('Error generating speech:', error);
         res.status(500).json({ error: 'Failed to generate speech' });
+    }
+});
+
+app.post('/api/mix-audio', async (req, res) => {
+    try {
+        const { text, voice = 'EXAVITQu4vr4xnSDxMaL', bgUrl } = req.body;
+
+        if (!text || !bgUrl) {
+            return res.status(400).json({ error: 'Text and bgUrl are required' });
+        }
+
+        console.log(`Starting mix for voice ${voice} and bgUrl: ${bgUrl.substring(0, 50)}...`);
+
+        // 1. Generate Voice TTS Buffer from ElevenLabs
+        const response = await axios({
+            method: 'post',
+            url: `https://api.elevenlabs.io/v1/text-to-speech/${voice}`,
+            headers: {
+                'Accept': 'audio/mpeg',
+                'xi-api-key': process.env.ELEVENLABS_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            data: {
+                text: text,
+                model_id: 'eleven_multilingual_v2',
+                voice_settings: {
+                    stability: 0.5,
+                    similarity_boost: 0.75
+                }
+            },
+            responseType: 'arraybuffer'
+        });
+        const voiceBuffer = Buffer.from(response.data);
+
+        // We need temporary files since ffmpeg works best with files
+        const tmpDir = '/tmp'; // Render has a /tmp directory we can use
+        if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+
+        const uniqueId = uuidv4();
+        const voicePath = path.join(tmpDir, `${uniqueId}_voice.mp3`);
+        const bgPath = path.join(tmpDir, `${uniqueId}_bg.mp3`);
+        const outPath = path.join(tmpDir, `${uniqueId}_mixed.mp3`);
+
+        // Save voice buffer to disk
+        fs.writeFileSync(voicePath, voiceBuffer);
+
+        // 2. Download Background Audio
+        const bgResponse = await axios({
+            url: bgUrl,
+            method: 'GET',
+            responseType: 'stream'
+        });
+
+        const bgWriter = fs.createWriteStream(bgPath);
+        bgResponse.data.pipe(bgWriter);
+
+        await new Promise((resolve, reject) => {
+            bgWriter.on('finish', resolve);
+            bgWriter.on('error', reject);
+        });
+
+        // 3. Mix them using FFmpeg
+        // We duck the background music: volume 1.0 normally, but during voice it's 0.15
+        console.log(`Mixing audio files with FFmpeg...`);
+
+        res.setHeader('Content-Type', 'audio/mpeg');
+        // If we want a file download, we use Content-Disposition:
+        // res.setHeader('Content-Disposition', 'attachment; filename="music-card.mp3"');
+
+        const ffmpegCommand = ffmpeg()
+            .input(bgPath)
+            .input(voicePath)
+            .complexFilter([
+                // [0:a] is background, [1:a] is voice
+                // Reduce background volume slightly overall, and heavily when voice is playing
+                // amix mixes the two audio tracks
+                "[0:a]volume=0.3[bg]; [1:a]volume=1.0[v]; [bg][v]amix=inputs=2:duration=first:dropout_transition=2"
+            ])
+            .outputOptions('-ac 2') // stereo
+            .format('mp3')
+            .on('end', () => {
+                console.log('FFmpeg processing finished.');
+                // Cleanup temp files
+                try {
+                    fs.unlinkSync(voicePath);
+                    fs.unlinkSync(bgPath);
+                    fs.unlinkSync(outPath);
+                } catch (e) { }
+            })
+            .on('error', (err) => {
+                console.error('FFmpeg error:', err);
+                if (!res.headersSent) res.status(500).json({ error: 'Error mixing audio' });
+
+                // Cleanup
+                try {
+                    fs.unlinkSync(voicePath);
+                    fs.unlinkSync(bgPath);
+                } catch (e) { }
+            });
+
+        // Instead of writing to a file, pipe directly to the response
+        ffmpegCommand.pipe(res, { end: true });
+
+    } catch (error) {
+        console.error('Error in mix-audio:', error);
+        if (!res.headersSent) res.status(500).json({ error: 'Failed to process audio mixture' });
     }
 });
 
