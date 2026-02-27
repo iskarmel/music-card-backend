@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
 import axios from 'axios';
+import multer from 'multer';
 
 // Set the path to the ffmpeg static binary
 ffmpeg.setFfmpegPath(ffmpegStatic);
@@ -46,6 +47,52 @@ const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Configure multer for handling file uploads in memory
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 15 * 1024 * 1024 } // 15MB limit for audio files
+});
+
+// Endpoint to upload user's custom audio track to Supabase Storage
+app.post('/api/upload-audio', upload.single('audio'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No audio file provided' });
+        }
+
+        const fileBuffer = req.file.buffer;
+        const originalName = req.file.originalname;
+        const ext = path.extname(originalName) || '.mp3';
+        const uniqueFilename = `${uuidv4()}${ext}`;
+        const contentType = req.file.mimetype || 'audio/mpeg';
+
+        // Upload to Supabase Storage bucket 'audio-uploads'
+        const uploadUrl = `${supabaseUrl}/storage/v1/object/audio-uploads/${uniqueFilename}`;
+
+        const supabaseResponse = await fetch(uploadUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${supabaseKey}`,
+                'apikey': supabaseKey,
+                'Content-Type': contentType
+            },
+            body: fileBuffer
+        });
+
+        if (!supabaseResponse.ok) {
+            const errorText = await supabaseResponse.text();
+            throw new Error(`Supabase upload failed: ${supabaseResponse.status} ${errorText}`);
+        }
+
+        // Get public URL
+        const publicUrl = `${supabaseUrl}/storage/v1/object/public/audio-uploads/${uniqueFilename}`;
+
+        res.json({ url: publicUrl });
+    } catch (error) {
+        console.error('Error uploading audio:', error);
+        res.status(500).json({ error: 'Failed to upload audio to storage' });
+    }
+});
 app.get('/api/audio-proxy', (req, res) => {
     const targetUrl = req.query.url;
     if (!targetUrl) return res.status(400).send('Missing URL');
