@@ -286,9 +286,10 @@ app.post('/api/mix-audio', async (req, res) => {
             .input(voicePath)
             .complexFilter([
                 // [0:a] is background, [1:a] is voice
-                // Reduce background volume slightly overall, and heavily when voice is playing
-                // amix mixes the two audio tracks
-                "[0:a]volume=0.3[bg]; [1:a]volume=1.0[v]; [bg][v]amix=inputs=2:duration=first:dropout_transition=2"
+                // Reduce background volume significantly so the voice is clear.
+                // Adelay delays the voice track by 2.5 seconds (2500ms) so the beat kicks in first.
+                // amix mixes them together.
+                "[0:a]volume=0.1[bg]; [1:a]volume=1.2,adelay=2500|2500[v]; [bg][v]amix=inputs=2:duration=first:dropout_transition=2"
             ])
             .outputOptions('-ac 2') // stereo
             .format('mp3')
