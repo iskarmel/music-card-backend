@@ -117,12 +117,13 @@ app.post('/api/generate', async (req, res) => {
         const { name, occasion, prompt, mood } = req.body;
 
         // System prompt sets the context for OpenAI
-        const systemPrompt = `Ты профессиональный сонграйтер-копирайтер. Твоя задача — написать текст короткой поздравительной песни (2 четверостишия).
+        const systemPrompt = `Ты профессиональный сонграйтер-копирайтер. Твоя задача — написать текст короткого ритмичного поздравления (2 четверостишия).
 Адресат: ${name}. Повод: ${occasion}.
 Смысл/информация от заказчика: "${prompt}".
-ВАЖНО: Текст должен быть стилизован под артиста/стиль: ${mood}.
-Сохрани фирменный слог, ритм и атмосферу этого исполнителя (например, рифмы, сленг или стиль Басты, если выбран он), чтобы текст идеально ложился на подобную музыку.
-Без лишних вступлений, только сам текст поздравления.`;
+ВАЖНО: Текст должен читаться как рэп или ритмичная поэзия в стиле: ${mood}.
+Используй ЖЕСТКУЮ РИФМУ (ААББ или АБАБ) и очень четкий РИТМ.
+РАССТАВЛЯЙ ПУНКТУАЦИЮ (запятые, тире, многоточия), чтобы диктору было понятно, где делать музыкальные паузы и акценты.
+Никаких лишних слов, только текст хита.`;
 
         const response = await openai.chat.completions.create({
             model: "gpt-4o-mini", // Use GPT-4o-mini for fast and cheap responses
@@ -162,8 +163,8 @@ app.get('/api/speech', async (req, res) => {
                 text: text,
                 model_id: 'eleven_multilingual_v2',
                 voice_settings: {
-                    stability: 0.5,
-                    similarity_boost: 0.75
+                    stability: 0.35, // Lower stability = more expressive/emotional
+                    similarity_boost: 0.8
                 }
             },
             responseType: 'arraybuffer'
@@ -198,8 +199,8 @@ app.post('/api/speech', async (req, res) => {
                 text: text,
                 model_id: 'eleven_multilingual_v2',
                 voice_settings: {
-                    stability: 0.5,
-                    similarity_boost: 0.75
+                    stability: 0.35,
+                    similarity_boost: 0.8
                 }
             },
             responseType: 'arraybuffer'
@@ -237,8 +238,8 @@ app.post('/api/mix-audio', async (req, res) => {
                 text: text,
                 model_id: 'eleven_multilingual_v2',
                 voice_settings: {
-                    stability: 0.5,
-                    similarity_boost: 0.75
+                    stability: 0.35,
+                    similarity_boost: 0.8
                 }
             },
             responseType: 'arraybuffer'
