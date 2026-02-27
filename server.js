@@ -13,8 +13,9 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 
-// In-memory database for cards (since Render free tier has a read-only filesystem)
-const cardsDb = {};
+// Supabase Configuration
+const supabaseUrl = process.env.SUPABASE_URL || 'https://yffwujipdmkysltvqjft.supabase.co';
+const supabaseKey = process.env.SUPABASE_KEY || 'sb_publishable_7V5AHsyId4rWO4AetrcmWg_yu1ZN_5b';
 
 app.use(cors({
     origin: '*',
@@ -137,12 +138,34 @@ app.post('/api/speech', async (req, res) => {
 });
 
 // Save a card and get a short ID
-app.post('/api/cards', (req, res) => {
+app.post('/api/cards', async (req, res) => {
     try {
         const cardData = req.body;
         const id = uuidv4().substring(0, 8); // 8-char short ID
 
-        cardsDb[id] = cardData;
+        // Insert into Supabase
+        const supabaseResponse = await fetch(`${supabaseUrl}/rest/v1/cards`, {
+            method: 'POST',
+            headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({
+                id: id,
+                name: cardData.name,
+                occasion: cardData.occasion,
+                lyrics: cardData.lyrics,
+                audio_url: cardData.audioUrl,
+                melody_text: cardData.melodyText
+            })
+        });
+
+        if (!supabaseResponse.ok) {
+            const errorText = await supabaseResponse.text();
+            throw new Error(`Supabase error saving card: ${supabaseResponse.status} ${errorText}`);
+        }
 
         res.json({ id });
     } catch (error) {
@@ -152,12 +175,33 @@ app.post('/api/cards', (req, res) => {
 });
 
 // Retrieve a card by ID
-app.get('/api/cards/:id', (req, res) => {
+app.get('/api/cards/:id', async (req, res) => {
     try {
         const id = req.params.id;
 
-        if (cardsDb[id]) {
-            res.json(cardsDb[id]);
+        const supabaseResponse = await fetch(`${supabaseUrl}/rest/v1/cards?id=eq.${id}&select=*`, {
+            method: 'GET',
+            headers: {
+                'apikey': supabaseKey,
+                'Authorization': `Bearer ${supabaseKey}`
+            }
+        });
+
+        if (!supabaseResponse.ok) {
+            throw new Error(`Supabase error retrieving card: ${supabaseResponse.status}`);
+        }
+
+        const data = await supabaseResponse.json();
+
+        if (data && data.length > 0) {
+            const row = data[0];
+            res.json({
+                name: row.name,
+                occasion: row.occasion,
+                lyrics: row.lyrics,
+                audioUrl: row.audio_url,
+                melodyText: row.melody_text
+            });
         } else {
             res.status(404).json({ error: 'Card not found' });
         }
